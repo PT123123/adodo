@@ -62,6 +62,7 @@ set(ADOLOOP_SOURCES
     util/TimeUtil.cpp
     util/StringUtil.cpp
     util/JapaneseInput.cpp
+    util/CrashLog.cpp            # 崩溃可观测性（M15）：Qt 消息 + terminate 落盘
 )
 
 add_executable(AdoLoop WIN32 ${ADOLOOP_SOURCES})

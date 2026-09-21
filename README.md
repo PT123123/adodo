@@ -201,13 +201,26 @@ just rebuild                              # clean + build（额外参数只传�
 ├── bookmarks.json      # 书签（按文件归属，全部媒体共用一份）
 ├── resume.json         # 断点续播位置（每个文件一条）
 ├── readings.json       # 读音缓存（词 → 假名/声调/词性，查词成功时写入）
-└── retell.json         # 段落复述练习历史（范围/句区间/评分/时间/媒体）
+├── retell.json         # 段落复述练习历史（范围/句区间/评分/时间/媒体）
+└── logs/               # M15 运行日志（崩溃定位用）
+    ├── adoloop.log     # Qt 消息 + 启动/退出横幅；warning 及以上立即刷盘，超 2 MB 滚动到 .1
+    └── terminate.log   # 致命级别的独立副本（qFatal 致命消息 / terminate 标记），主日志被占用时也留痕迹
 ```
 
 > 路径说明：Windows 上 `QStandardPaths::AppDataLocation` 为 `%APPDATA%\<组织>\<应用>`，
 > 默认数据目录再拼一级 `AdoLoop` 子目录，因此**实际**数据目录是
 > `%APPDATA%\AdoLoop\AdoLoop\AdoLoop\`（`adoloop.ini` 在其上一级）；
 > 可在「设置 → 通用 / 引擎 → 数据目录」改到任意位置。
+>
+> `logs\adoloop.log` 是 M15 为定位「启动期偶发 abort」加的埋点（程序按 Windows GUI 子系统链接，
+> stderr 在多数启动方式下拿不到，所以以落盘为准）：每条记录形如
+> `[时间] [pid] [级别] [类别] 正文`；每次启动写一条「启动」横幅（含 qt 版本/平台/相关环境变量），
+> 正常退出的那次写「退出」——**只有启动没有退出 = 该次运行非正常结束**。
+> 崩溃时会先落盘 Qt 的致命原文（`[fatal]` 行）再 abort，并附**调用栈（module+RVA）**——
+> 本机没有调试器也没有符号文件，但「模块名+偏移」这套指纹足以和已知原因的对照实验逐帧比对，
+> 判断是不是同一条 `qFatal` 路径。所以下一次崩溃可以直接看到原因（至少能分清是哪一类致命失败）。
+> 日志只写这个数据目录，不写仓库；默认滚动上限 2 MB（保留一份历史 `.1`）。
+> `ADOLOOP_LOG_SELFTEST=1` 启动时额外写一条 warning + 一条 critical，用来验证日志链路（默认关闭）。
 
 ## 文档索引
 
@@ -248,8 +261,20 @@ just rebuild                              # clean + build（额外参数只传�
   仅在当前会话内有效。断点续播位置 < 3s 不恢复、距结尾 5s 内不记录（视为已听完）。
 - **界面交互一律未验证**：菜单/快捷键/面板按钮、字幕隐藏与揭晓的实际显示、
   复述录音链路、生词本与闪卡列表排版——按约束未启动带界面的程序。
-- ⚠ **Release 版启动偶发 abort（已知问题，未定位/未修复）**：M13 做重复启动实验时观测到
-  **约 2 次 / 87 次**（退出码 `0xC0000409`；Windows 事件日志记为 `BEX64`、
-  出错模块 `Qt6Core.dll`、子码 `7` = `FAST_FAIL_FATAL_APP_EXIT`，即 `abort()`/`terminate()` 路径）。
-  不可按需复现，Debug 版连续 15 次未复现；**与发行包无关**（DLL 加载失败会是 `0xC0000135`），
-  也**先于 M13 存在**（本次未改任何 C++ 代码）。详见 `docs/11-进度日志.md` M13 节。
+- ⚠ **Release 版启动偶发 abort（已知问题，未修复）**：Windows 事件日志/WER 记为 `BEX64`、
+  出错模块 `Qt6Core.dll` 6.8.3、异常代码 `0xC0000409`、异常数据 `7` = `FAST_FAIL_FATAL_APP_EXIT`
+  （即 `abort()` / `terminate` 路径）——**M15 已把它定位到机理层**：
+  - 9 份崩溃报告（`%ProgramData%\Microsoft\Windows\WER\ReportArchive\AppCrash_AdoLoop.exe_*`）
+    异常偏移全部是 `0x267a8`；逐字节解析 Qt6Core.dll 后确认该地址就是 Qt 自己 `qAbort()` 里那条
+    `int 29h`（FAST_FAIL）指令 ⇒ **崩溃发生在 Qt 的致命消息路径（`qFatal` 等），不是数据损坏**。
+  - **9/9 都发生在 `dist\AdoLoop\AdoLoop.exe`（发行包）**，涉及 3 个不同构建。
+  - 已复现一条能产生**逐字段一致**崩溃签名的机理：启动时发行包的 `platforms\`（平台插件）不可用
+    → Qt 报 `This application failed to start because no Qt platform plugin could be initialized…` 并 abort；
+    对照组（`platforms\` 完整）不崩。但这**不等于**确认历史 9 次的根因——当时没有日志，
+    而所有 `qFatal` 都走同一个 `qAbort`，WER 层分不出是哪条消息。
+  - 处置：已加运行日志（见「数据目录」的 `logs\`），**下一次崩溃会自己留下 Qt 的致命原文**；
+    复现脚本 `scripts\soak-run.ps1`（`just soak`）可按维度矩阵重复启动并在抓到崩溃时保留现场。
+    本轮约 300 次启动未复现，因此**未改任何业务代码**。详见 `docs/11-进度日志.md` M15 节。
+  - 另一个已实测的坑：发行包只带 `platforms\qwindows.dll`，所以 `QT_QPA_PLATFORM=offscreen`
+    在发行包上会**静默回退到真实窗口平台**（真的会建出窗口），「无窗口自检」只在构建树产物上成立；
+    详见 `docs/03-工程结构与构建.md` 第 6.2 节。

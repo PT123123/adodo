@@ -36,6 +36,15 @@ run-dist *args:
 smoke *args:
 	& '{{justfile_directory()}}/scripts/run.ps1' -SkipBuild -Offscreen -TimeoutSec 8 {{trim_start_matches(args, "--")}}; exit $LASTEXITCODE
 
+# 参数：-Product -Platform -Rounds -PerRound -Concurrent -TimeoutSec -QtPathMode -WorkDir
+#       -Interleave -ArtifactDir -DataDir -DeployPlatformPluginToDist -FallbackPluginPath
+#       -AllowGuiWindow -KeepGoing -MaxRuns
+# 例：just soak -- -Product dist -Concurrent -Interleave package -DeployPlatformPluginToDist
+# 说明见 docs/11 M15；抓到崩溃以退出码 2 结束并保留现场（日志增量/退出码/WER 报告）
+# M15 启动期崩溃复现：按维度矩阵重复启动（只运行，不构建）
+soak *args:
+	& '{{justfile_directory()}}/scripts/soak-run.ps1' {{trim_start_matches(args, "--")}}; exit $LASTEXITCODE
+
 # 打包便携发行包 dist\AdoLoop\（默认先构建；加 `-- -SkipBuild` 复用已有产物）
 package *args:
 	& '{{justfile_directory()}}/scripts/package.ps1' {{trim_start_matches(args, "--")}}; exit $LASTEXITCODE
