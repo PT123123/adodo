@@ -1,5 +1,7 @@
 build/
 build-*/
+# 打包产物（scripts/package.ps1 输出；发行包不应入库）
+dist/
 *.user
 *.autosave
 .cache/

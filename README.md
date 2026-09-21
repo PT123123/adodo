@@ -8,10 +8,12 @@
 > 开发约束：初版按用户要求以**写代码为主、不强制编译**，不使用 GUI 自动化、不截图；
 > 全部设计过程见 `docs/`。**M9 完成首次实际构建**、**M10 补齐播放列表/书签/断点续播**、
 > **M11 完成日语化（分词地基）+ 悬停取词 + 词典发音 + 听音查字**、
-> **M12 完成读音缓存 + 生词本/闪卡日语化 + 段落复述（P0 最后一块）**：
+> **M12 完成读音缓存 + 生词本/闪卡日语化 + 段落复述（P0 最后一块）**、
+> **M13 把构建/运行/打包全部 PowerShell 化（剥离对批处理脚本的依赖）并产出自带 Qt 的便携发行包**：
 > MSVC 19.44 + Qt 6.8.3 下 configure/build 退出码均为 0（零 error / 零 warning），
-> 产出 `build/src/AdoLoop.exe`（904,192 字节，
-> sha256 `15e6b24beb68072d20078e889f9c790318937610145f01b3e9441b9d946767ee`）；
+> 产出 `build/src/AdoLoop.exe`（904,192 字节）；
+> `dist/AdoLoop/`（96.26 MB / 67 文件）在**PATH 中不含任何 Qt 目录**时仍能 offscreen 启动
+> （对照组裸 exe 同条件下以 `0xC0000135 STATUS_DLL_NOT_FOUND` 立刻退出）。
 > 另有 M12 的 357 条离线断言全过（累计 M11 的 137 条 + 真实词典回放 22 条，详见 `docs/11-进度日志.md`）。
 > 运行期仅做了 `QT_QPA_PLATFORM=offscreen` 无窗口启动自检与纯逻辑校验，界面行为尚未人工验证。
 
@@ -59,26 +61,52 @@
 
 ## 构建
 
-```bat
-:: 前置：Qt 6.5+（Widgets/Multimedia/Network/Concurrent）、CMake 3.21+、MSVC 2022（或 MinGW）
-:: 在「x64 Native Tools Command Prompt for VS 2022」中，或先执行 vcvars64.bat：
-::   call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+前置：**Qt 6.5+**（Widgets / Multimedia / Network / Concurrent）、**CMake 3.21+**、
+**Visual Studio 2022**（含「使用 C++ 的桌面开发」工作负载，自带 MSVC 与 ninja）。
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
-cmake --build build -j 8
-:: 产物：build/src/AdoLoop.exe
+构建脚本是**纯 PowerShell**，不依赖任何批处理脚本，也不需要「x64 Native Tools 命令提示符」——
+MSVC 环境由 VS 自带的 `Launch-VsDevShell.ps1` 在**当前会话**内加载：
+
+```powershell
+.\scripts\build.ps1                     # Release，默认 build\ 目录
+.\scripts\build.ps1 -Clean              # 先清理再全量构建
+.\scripts\build.ps1 -Config Debug -Jobs 4
+.\scripts\build.ps1 -QtDir 'D:\Qt\6.8.3\msvc2022_64'
+# 产物：build\src\AdoLoop.exe（结束时打印路径、字节数与 sha256）
+```
+
+脚本会自动完成：vswhere 定位 VS → 加载 MSVC 环境 → 把 MinGW/Strawberry 目录从 PATH 剔除
+→ 自动探测 Qt（`C:\Qt\<版本>\msvc2022_64`，取最高版本）→ 优先用 VS 自带 ninja
+（`Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe`）→ configure + build，
+并在最后校验 `CMAKE_CXX_COMPILER` 确实是 `cl.exe`。任一步失败都以非零退出码结束。
+
+运行与打包：
+
+```powershell
+.\scripts\run.ps1                       # 构建（可选）后启动，自动把 Qt 的 bin 摆进 PATH
+.\scripts\run.ps1 -SkipBuild            # 直接跑已有产物
+.\scripts\package.ps1                   # 产便携发行包 dist\AdoLoop\
+.\scripts\package.ps1 -SkipBuild -Zip   # 复用产物打包并压缩
+.\scripts\clean.ps1                     # 清理 build\ 与 dist\（带路径安全校验）
 ```
 
 说明：
 
-- Qt 未装在默认路径时必须给 `-DCMAKE_PREFIX_PATH=<Qt 的 msvc2022_64 目录>`。
-- PATH 中若有 MinGW/Strawberry 的 `gcc` 且排在 cl.exe 之前，CMake 会误选 GNU 工具链
-  （与 Qt 的 MSVC 库 ABI 不兼容）；此时用
-  `-DCMAKE_MAKE_PROGRAM=<ninja 绝对路径>` 并把 MinGW 目录移到 vcvars 之后。
-- 也可改用 Visual Studio 生成器：`cmake -S . -B build -G "Visual Studio 17 2022" -A x64`，
-  随后 `cmake --build build --config Release -j`（多配置生成器的产物在 `build/src/Release/`）。
-- 首次构建后若需运行，请把 `C:\Qt\6.8.3\msvc2022_64\bin` 加入 PATH（或用 `windeployqt` 部署）。
+- **便携发行包**：`dist\AdoLoop\` 自带 Qt6 DLL、平台插件（`platforms\qwindows.dll`）、
+  多媒体插件（`multimedia\ffmpegmediaplugin.dll` / `windowsmediaplugin.dll`）、
+  MSVC 运行库（`vcruntime140*.dll` / `msvcp140*.dll`）与 Python 桥脚本（`scripts\*.py`），
+  **目标机器不需要装 Qt，也不需要 Qt 目录进 PATH**。整个目录可直接拷贝运行。
+- 发行包默认按 `windeployqt` 的完整输出部署（约 96 MB）。想瘦身可加
+  `-SkipOpenGlSw -SkipD3DCompiler -SkipTranslations`（实测约 47 MB，本机 offscreen 自检通过）。
+- Qt 未装在默认路径时给 `-QtDir <Qt 的 msvc2022_64 目录>`，或设环境变量
+  `ADOLOOP_QT_ROOT=<Qt 安装根目录>`。
+- 脚本自己保证工具链正确：PATH 中即使有 MinGW/Strawberry 的 `gcc`，也会被剔除后再 configure，
+  无需手工调整 PATH；configure 后还会核对 `CMAKE_CXX_COMPILER` 是不是 `cl.exe`。
+- 也可改用 Visual Studio 生成器：`.\scripts\build.ps1 -Generator 'Visual Studio 17 2022'`，
+  产物在 `build\src\Release\`。
+- 只跑构建树的 exe 需要 Qt 的 `bin` 在 PATH ——用 `.\scripts\run.ps1` 即可（脚本负责摆 PATH）；
+  想彻底脱离 Qt 安装目录就用 `.\scripts\package.ps1` 产出的发行包。
+- 兼容 Windows PowerShell 5.1 与 PowerShell 7+；不依赖任何第三方模块。
 
 ## 外部组件（全部可选，缺失自动降级）
 
@@ -174,3 +202,8 @@ cmake --build build -j 8
   仅在当前会话内有效。断点续播位置 < 3s 不恢复、距结尾 5s 内不记录（视为已听完）。
 - **界面交互一律未验证**：菜单/快捷键/面板按钮、字幕隐藏与揭晓的实际显示、
   复述录音链路、生词本与闪卡列表排版——按约束未启动带界面的程序。
+- ⚠ **Release 版启动偶发 abort（已知问题，未定位/未修复）**：M13 做重复启动实验时观测到
+  **约 2 次 / 87 次**（退出码 `0xC0000409`；Windows 事件日志记为 `BEX64`、
+  出错模块 `Qt6Core.dll`、子码 `7` = `FAST_FAIL_FATAL_APP_EXIT`，即 `abort()`/`terminate()` 路径）。
+  不可按需复现，Debug 版连续 15 次未复现；**与发行包无关**（DLL 加载失败会是 `0xC0000135`），
+  也**先于 M13 存在**（本次未改任何 C++ 代码）。详见 `docs/11-进度日志.md` M13 节。
