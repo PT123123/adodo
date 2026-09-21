@@ -14,6 +14,9 @@
 > 产出 `build/src/AdoLoop.exe`（904,192 字节）；
 > `dist/AdoLoop/`（96.26 MB / 67 文件）在**PATH 中不含任何 Qt 目录**时仍能 offscreen 启动
 > （对照组裸 exe 同条件下以 `0xC0000135 STATUS_DLL_NOT_FOUND` 立刻退出）。
+> **M14 引入 just 入口层**（仓库根 `justfile`，只是 `scripts\*.ps1` 的薄封装）：
+> `just build` 构建、**`just run` 只运行已有产物**（恒传 `-SkipBuild`，产物缺失即报错、绝不回落构建），
+> 另有 `run-dist` / `smoke` / `package` / `clean` / `rebuild`；just 是**可选**前置工具，不装也不影响任何功能。
 > 另有 M12 的 357 条离线断言全过（累计 M11 的 137 条 + 真实词典回放 22 条，详见 `docs/11-进度日志.md`）。
 > 运行期仅做了 `QT_QPA_PLATFORM=offscreen` 无窗口启动自检与纯逻辑校验，界面行为尚未人工验证。
 
@@ -107,6 +110,49 @@ MSVC 环境由 VS 自带的 `Launch-VsDevShell.ps1` 在**当前会话**内加载
 - 只跑构建树的 exe 需要 Qt 的 `bin` 在 PATH ——用 `.\scripts\run.ps1` 即可（脚本负责摆 PATH）；
   想彻底脱离 Qt 安装目录就用 `.\scripts\package.ps1` 产出的发行包。
 - 兼容 Windows PowerShell 5.1 与 PowerShell 7+；不依赖任何第三方模块。
+
+### 用 just 构建（可选）
+
+仓库根目录另有一个 `justfile`（**M14**），把上面的脚本包成短命令。它需要自行安装
+[just](https://github.com/casey/just)（本机为 1.58.0，`C:\Users\ted\Tools\just.exe`，在 PATH 中）；
+**just 只是可选的前置工具——justfile 是 `scripts\*.ps1` 的薄封装，不含任何构建逻辑，
+不装 just 时上面那些脚本照常直接用。**
+
+```powershell
+just                                      # 列出全部命令（等价 just --list）
+just build                                # 构建 Release → build\src\AdoLoop.exe
+just run                                  # 只运行已有产物（不构建；缺产物则报错并提示先 just build）
+just run -- -Offscreen -TimeoutSec 5      # 无窗口冒烟（额外参数用 -- 透传，-- 也可省略）
+just run-dist                             # 运行发行包产物 dist\AdoLoop\AdoLoop.exe（不注入 Qt 路径）
+just smoke                                # 无窗口启动自检：offscreen + 8 秒超时
+just package                              # 构建 + 打包 dist\AdoLoop\
+just package -- -SkipBuild -Zip           # 复用已有产物打包并压缩
+just clean                                # 清理 build\ 与 dist\
+just rebuild                              # clean + build（额外参数只传给 build）
+```
+
+| recipe | 语义 | 实际调用 |
+| --- | --- | --- |
+| `build` | 构建（默认 Release） | `scripts\build.ps1 <额外参数>` |
+| `run` | **只运行**已有构建产物，恒传 `-SkipBuild` | `scripts\run.ps1 -SkipBuild <额外参数>` |
+| `run-dist` | 运行发行包产物，按「自包含」语义不注入 Qt 路径 | `scripts\run.ps1 -SkipBuild -Exe dist\AdoLoop\AdoLoop.exe -NoQtPath …` |
+| `smoke` | 无窗口启动自检（8 秒后仍存活即通过） | `scripts\run.ps1 -SkipBuild -Offscreen -TimeoutSec 8` |
+| `package` | 打包便携发行包（默认先构建） | `scripts\package.ps1 <额外参数>` |
+| `clean` | 清理生成目录（带路径安全校验） | `scripts\clean.ps1 <额外参数>` |
+| `rebuild` | clean + build | 先 `clean.ps1`，再 `build.ps1 <额外参数>` |
+| `default` | 直接执行 `just` 时列出全部命令 | `just --list` |
+
+注意：
+
+- **`just run` 与 `just build` 职责不重叠**：`run` 恒传 `-SkipBuild`，产物不存在时立刻以非零退出码
+  报错（`-SkipBuild 但找不到已有产物：… 请先执行 .\scripts\build.ps1（或 just build）`），
+  **不会**替你构建。
+- 参数透传写成「`--` + 原样参数」，`--` 可省略（如 `just run -Offscreen -TimeoutSec 5`）；
+  但**参数值里不要带空格**——just 的变长参数按空格拼接，引号无法原样保留，需要时请直接调用脚本。
+- 命令统一交给 `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command` 执行（不依赖默认
+  shell 是 cmd 还是 sh，也不调用 `cmd.exe` / 任何 `.bat`）；脚本的退出码会原样传给 `just`。
+- `just smoke` 已内置 `-Offscreen -TimeoutSec 8`，要换超时请用
+  `just run -- -Offscreen -TimeoutSec N`；给 `smoke` 再传一次 `-TimeoutSec` 会与内置值冲突。
 
 ## 外部组件（全部可选，缺失自动降级）
 

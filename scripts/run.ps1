@@ -155,7 +155,7 @@ try {
         Write-Step '1/3 使用指定的可执行文件（-Exe）'
         $exePath = Resolve-AdoLoopPath -Path $Exe -BaseDir $repoRoot
         if (-not (Test-Path -LiteralPath $exePath)) {
-            throw "-Exe 指定的文件不存在：$exePath"
+            throw "-Exe 指定的文件不存在：$exePath（若这是构建产物，请先执行 .\scripts\build.ps1 或 just build）"
         }
         Write-Ok ("产物：$exePath（{0:N0} 字节）" -f (Get-Item -LiteralPath $exePath).Length)
     } elseif ($SkipBuild) {
@@ -168,7 +168,7 @@ try {
         }
         if ($null -eq $exePath) {
             throw ("-SkipBuild 但找不到已有产物：$buildAbs\src\AdoLoop.exe`n" +
-                   '        请先执行 .\scripts\build.ps1，或去掉 -SkipBuild。')
+                   '        请先执行 .\scripts\build.ps1（或 just build），或去掉 -SkipBuild。')
         }
         Write-Ok "复用产物：$exePath"
     } else {
